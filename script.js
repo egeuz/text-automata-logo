@@ -6,6 +6,7 @@ function preload() {
 }
 
 function setup() {
+  frameRate(60)
   createCanvas(windowWidth, windowHeight)
   ta = new TextAutomata("EGE UZ", {
     font: font,
@@ -34,10 +35,34 @@ class TextAutomata {
       createVector(width / 2, height / 2) :
       config.position
     //operational properties
+    this.resolution = 6; //grid resolution
+    this.margin = 100; //margin around grid
     this.vectorText = this.initVectorText()
+    this.vectorRect = this.getTextVectorRect(this.vectorText)
     this.grid = this.initCellGrid()
+    this.initCellNeighbors()
+    this.steps = 0;
   }
 
+  /*** RENDER METHODS ***/
+
+  render() {
+    push()
+    strokeWeight(1.5)
+    this.grid.forEach(cell => {
+      cell.render()
+      if (this.mouseIsHovering()) {
+        cell.generate()
+        this.steps += 1;
+      } else if (this.steps > 0) {
+        cell.backstep()
+        this.steps -= 1;
+      }
+    })
+    pop()
+  }
+
+  /*** INIT METHODS ***/
   initVectorText() {
     // const vectorText = [] //an array of letters -> objects w/ vector array forming letters
     let { x: posx, y: posy } = this.position //starting position
@@ -69,38 +94,60 @@ class TextAutomata {
 
   initCellGrid() {
     const grid = [];
-    const {x, y, w, h} = this.getTextVectorRect(this.vectorText)
-    const margin = 100;
-    const resolution = 10;
-
-    for (let i = x - margin; i < x + w + margin; i += resolution) {
-      for (let j = y - margin; j < y + h + margin; i += resolution) {
-        const state = this.getInitialCellState(i, j, resolution)
-        const cell = new Cell(i, j, resolution, state)
+    const { x, y, w, h } = this.vectorRect
+    const m = this.margin
+    const res = this.resolution
+    for (let i = x - m; i < x + w + m; i += res) {
+      for (let j = y - m; j < y + h + m; j += res) {
+        const state = this.getInitialCellState(i, j, res)
+        const cell = new Cell(i, j, res, state)
         grid.push(cell)
-      } 
+      }
     }
-
+    return grid;
   }
 
-  render() {
+  initCellNeighbors() {
+    const { w } = this.vectorRect
+    const res = this.resolution
+    const cols = floor(w / res)
+    const getCellNeighbors = i => [
+      this.grid[i - 1], //west
+      this.grid[i + 1], //east
+      this.grid[i - cols], //north
+      this.grid[i + cols], //south
+      this.grid[i - cols - 1], //nw
+      this.grid[i + cols - 1], //sw
+      this.grid[i - cols + 1], //ne
+      this.grid[i + cols + 1] //se
+    ]
+    this.grid.forEach((cell, i) => {
+      cell.neighbors = [...new Set(getCellNeighbors(i))].filter(n => n !== undefined)
+    })
+  }
+
+
+  renderVectorText() { //testing only
+    push()
+    fill(255)
+    stroke(255)
+    this.vectorText.forEach(letter => {
+      beginShape()
+      letter.forEach((pt) => {
+        vertex(pt.x, pt.y)
+      })
+      endShape(CLOSE)
+    })
+    pop()
+  }
+
+  renderGuides() { //testing only
     push()
     fill('red')
     noStroke()
     rect(width / 2, 0, 1, height)
     rect(0, height / 2, width, 1)
     pop()
-
-    let clr = 255
-    strokeWeight(5)
-    this.vectorText.forEach(letter => {
-      beginShape()
-      letter.forEach((pt) => {
-        stroke(clr)
-        vertex(pt.x, pt.y)
-      })
-      endShape(CLOSE)
-    })
   }
 
   /*** HELPER METHODS  ***/
@@ -146,7 +193,7 @@ class TextAutomata {
   }
 
   //generating automata cells
-  getInitialCellState(x, y, res) {
+  getInitialCellState(x, y) {
     for (let i = 0; i < this.vectorText.length; i++) {
       const letter = this.vectorText[i]
       if (this.raycast(letter, x, y)) return 1;
@@ -177,6 +224,15 @@ class TextAutomata {
       }
     }
   }
+
+  //hover interaction
+  mouseIsHovering() {
+    const { x, y, w, h } = this.vectorRect;
+    return mouseX >= x &&
+      mouseX <= x + w &&
+      mouseY >= y &&
+      mouseY <= y + h
+  }
 }
 
 class Cell {
@@ -186,6 +242,38 @@ class Cell {
     this.size = size;
     this.initialState = initialState;
     this.state = initialState;
-    this.history = [initialState];
+    this.history = [];
+    this.neighbors; //initialized during TextAutomata init
+  }
+
+  render() {
+    const clr = this.state === 1 ? 255 : 0
+    fill(clr)
+    stroke(clr)
+    strokeWeight(this.size / 4)
+    rect(this.x, this.y, this.size)
+  }
+
+  generate() {
+    const aliveCells = this.neighbors.map(n => n.state).reduce((a, b) => a + b)
+    const newState = this.determineState(this.state, aliveCells)
+    this.history.push(this.state)
+    this.state = newState
+  }
+
+  backstep() {
+    this.state = this.history.pop()
+  }
+
+  determineState(cell, aliveCells) {
+    if (cell === 1 && aliveCells < 2) {
+      return 0
+    } else if (cell === 1 && aliveCells > 3) {
+      return 0
+    } else if (cell === 0 && aliveCells === 3) {
+      return 1
+    } else {
+      return cell
+    }
   }
 }
